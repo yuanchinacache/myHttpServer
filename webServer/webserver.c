@@ -42,7 +42,7 @@ static int getHomePath(char *path);
 static int sendFile(int cfd, char *path);
 static int status500(int cfd);
 static int status501(int cfd);
-static int status404(int cfd);
+static int status404(int cfd, int isLongConnect);
 
 
 
@@ -76,19 +76,33 @@ int doRequest(int cfd)
 {
 	char request_buf[MAX_REQUEST];
 	int command;
-	
-	getRequest(cfd, request_buf);
-	getCommand(request_buf, &command);
-			
-	switch(command)
+	int isLongConnect;
+
+	do
 	{
-	case GET:
-		doGet(cfd, request_buf);
-		break;
-	default:
-		status501(cfd);
-		exit(0);
-	}	
+		printf("start!\n");
+		getRequest(cfd, request_buf);
+		if(NULL == strstr(request_buf, "Connection: close"))
+		{
+			isLongConnect = 1;
+		}
+		else
+		{
+			isLongConnect = 0;
+		}
+
+		getCommand(request_buf, &command);			
+		switch(command)
+		{
+		case GET:
+			doGet(cfd, request_buf);
+			break;
+		default:
+			status501(cfd);
+			exit(-1);
+		}
+		printf("end!\n");
+	}while(isLongConnect);
 
 	return 0;
 }
@@ -136,15 +150,15 @@ int getRequest(int cfd, char *request_buf)
 	int count;
 	char buf[MAX_REQUEST];
 	int flag;
-	int flags;
 	
 	/* get request. */
-
 	flag = 1;
 	sum = 0;
 	while(flag)
 	{
+		//printf("read start!\n");
 		read(cfd, buf + sum, 1);
+		//printf("read end!\n");
 		if('\n' == *(buf + sum))
 		{
 			//printf("read1\n");
@@ -199,6 +213,17 @@ int doGet(int cfd, char *request_buf)
 {
 	char path[MAX_LINE];
 	struct stat statbuf;
+	int isLongConnect;
+	char buf[30];
+	
+	if(NULL == strstr(request_buf, "Connection: close"))
+	{
+		isLongConnect = 1;
+	}
+	else
+	{
+		isLongConnect = 0;
+	}
 
 	/* get path from request of client */
 	getPath(path, request_buf);
@@ -207,17 +232,18 @@ int doGet(int cfd, char *request_buf)
 	if(-1 == access(path, 0))
 	{
 		perror("access fail");
-		status404(cfd);
-		exit(-1);	
+		status404(cfd, isLongConnect);
+		return -1;	
 	}
 	
 	/* process according to type of file */
 	stat(path, &statbuf);
 	if(!S_ISREG(statbuf.st_mode))
 	{
-		status404(cfd);
-		exit(0);
+		status404(cfd, isLongConnect);
+		return -1;
 	}
+
 	if(statbuf.st_mode & S_IXOTH)
 	{
 		dup2(cfd, STDOUT_FILENO);
@@ -225,8 +251,14 @@ int doGet(int cfd, char *request_buf)
 	}
 
 	write(cfd, "HTTP/1.1 200 OK\r\n", strlen("HTTP/1.1 200 OK\r\n"));
+	sprintf(buf, "Content-Length: %d\r\n", statbuf.st_size);
+	write(cfd, buf, strlen(buf));
+	if(isLongConnect)
+	{
+		write(cfd, "Connection: keep-alive\r\n", strlen("Connection: keep-alive\r\n"));
+	}
 	write(cfd, "Content-Type: text/html\r\n\r\n", strlen("Content-Type: text/html\r\n\r\n"));
-	sendFile(cfd, path);	
+	sendFile(cfd, path);
 	
 	return 0;
 }
@@ -321,18 +353,48 @@ int sendFile(int cfd, char *path)
 /*
  *
  */
-int status404(int cfd)
+int status404(int cfd, int isLongConnect)
 {
-	dup2(cfd, STDOUT_FILENO);
-	printf( "HTTP/1.1 404 Not Exist\r\n"
-		"Content-Type: text/html\r\n\r\n"
-		"<html>\n"
-		"<head><title>error</title></head>\n"
-		"<body>\n"
-		"<p>This file does not exist!</p>\n"
-		"</body>\n"
-		"</html>\n"
-		);
+	char buf[200];
+
+	if(isLongConnect)
+	{
+		sprintf(buf, 
+			"HTTP/1.1 404 Not Exist\r\n"
+			"Connection: keep-alive\r\n"
+			"Content-Length: %d\r\n"
+			"Content-Type: text/html\r\n\r\n"
+			"<html>\n"
+			"<head><title>error</title></head>\n"
+			"<body>\n"
+			"<p>This file does not exist!</p>\n"
+			"</body>\n"
+			"</html>\n", 
+			strlen( "<html>\n"
+				"<head><title>error</title></head>\n"
+				"<body>\n"
+				"<p>This file does not exist!</p>\n"
+				"</body>\n"
+				"</html>\n"
+				)
+			);
+	}
+	else
+	{
+		sprintf(buf, 
+			"HTTP/1.1 404 Not Exist\r\n"
+			"Content-Type: text/html\r\n\r\n"
+			"<html>\n"
+			"<head><title>error</title></head>\n"
+			"<body>\n"
+			"<p>This file does not exist!</p>\n"
+			"</body>\n"
+			"</html>\n"
+			);
+	}
+	write(cfd, buf, strlen(buf));
+
+	return 0;
 }
 
 /*
@@ -350,6 +412,7 @@ int status500(int cfd)
 		"</body>\n"
 		"</html>\n"
 		);
+
 	return 0;
 }
 
@@ -362,12 +425,13 @@ int status501(int cfd)
 	printf( "HTTP/1.1 501 Not Implemented\r\n"
 		"Content-Type: text/html\r\n\r\n"
 		"<html>\n"
-		"<head><title>error</title></head>\n"
+		"<head>title>error</title></head>\n"
 		"<body>\n"
 		"<p>This operate does not support!</p>\n"
 		"</body>\n"
 		"</html>\n"
 		);
+
 	return 0;
 }
 
