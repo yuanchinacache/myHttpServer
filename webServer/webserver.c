@@ -425,7 +425,7 @@ int status501(int cfd)
 	printf( "HTTP/1.1 501 Not Implemented\r\n"
 		"Content-Type: text/html\r\n\r\n"
 		"<html>\n"
-		"<head>title>error</title></head>\n"
+		"<head><title>error</title></head>\n"
 		"<body>\n"
 		"<p>This operate does not support!</p>\n"
 		"</body>\n"
