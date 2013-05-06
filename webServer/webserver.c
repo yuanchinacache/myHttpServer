@@ -11,7 +11,7 @@
  */
 #define PORT_STR_SIZE 6
 #define MAX_LINE 100
-#define MAX_REQUEST 1000
+#define MAX_REQUEST 2000
 #define MAX_RW 100
 #define MAX_COMMAND 20
 
@@ -251,8 +251,9 @@ int doGet(int cfd, char *request_buf)
 	}
 
 	write(cfd, "HTTP/1.1 200 OK\r\n", strlen("HTTP/1.1 200 OK\r\n"));
-	sprintf(buf, "Content-Length: %d\r\n", statbuf.st_size);
-	write(cfd, buf, strlen(buf));
+//	sprintf(buf, "Content-Length: %d\r\n", statbuf.st_size);
+//	write(cfd, buf, strlen(buf));
+	write(cfd, "Transfer-Encoding: chunked\r\n", strlen("Transfer-Encoding: chunked\r\n"));
 	if(isLongConnect)
 	{
 		write(cfd, "Connection: keep-alive\r\n", strlen("Connection: keep-alive\r\n"));
@@ -336,15 +337,22 @@ int sendFile(int cfd, char *path)
 {
 	int fd;
 	int count;
-	char buf[MAX_RW];
+	char chunkDataBuf[MAX_RW];
+	char chunkSizeBuf[MAX_LINE];
 
 	fd = open(path, O_RDONLY);
-	count = read(fd, buf, MAX_RW);
+	count = read(fd, chunkDataBuf, MAX_RW);
 	while(count != 0)
 	{
-		write(cfd, buf, count);
-		count = read(fd, buf, MAX_RW);
+		sprintf(chunkSizeBuf, "%x\r\n", count);//
+//		printf("chunkSizeBuf:%s", chunkSizeBuf);
+		write(cfd, chunkSizeBuf, strlen(chunkSizeBuf));//
+		write(cfd, chunkDataBuf, count);
+		write(cfd, "\r\n", strlen("\r\n"));//
+		count = read(fd, chunkDataBuf, MAX_RW);
 	}
+	write(cfd, "0\r\n", strlen("0\r\n"));//
+	write(cfd, "\r\n", strlen("\r\n"));//
 	close(fd);
 
 	return 0;
