@@ -18,6 +18,11 @@
 #define GET 1
 #define PUT 2
 
+#define ON 1
+#define OFF 0
+
+#define HOME_PATH "./webserver.config"
+
 /*
  * head files
  */
@@ -39,12 +44,11 @@ static int getCommand(char *request_buf, int *command);
 static int doGet(int cfd, char *request_buf);
 static int getPath(char *path, char *request_buf);
 static int getHomePath(char *path);
+static int getLongConnectConfig(int *configStatus);
 static int sendFile(int cfd, char *path);
 static int status500(int cfd);
 static int status501(int cfd);
 static int status404(int cfd, int isLongConnect);
-
-
 
 /*
  *
@@ -77,7 +81,13 @@ int doRequest(int cfd)
 	char request_buf[MAX_REQUEST];
 	int command;
 	int isLongConnect;
+	int longConnectSwitch;
 
+	getLongConnectConfig(&longConnectSwitch);
+	//printf("longConnectSwitch:%d\n", longConnectSwitch);
+	/*
+	when client close, how to exit process of server?
+	*/
 	do
 	{
 		printf("start!\n");
@@ -102,7 +112,7 @@ int doRequest(int cfd)
 			exit(-1);
 		}
 		printf("end!\n");
-	}while(isLongConnect);
+	}while(isLongConnect && longConnectSwitch);
 
 	return 0;
 }
@@ -112,7 +122,7 @@ int doRequest(int cfd)
  * param[in]:
  * param[out]: port number
  * return: status -1 fail and 0 success
- * describe: get port number from configure file ./webserver.config
+ * describe: get port number from configure file 
  */
 int getPort(int *port)
 {
@@ -121,7 +131,7 @@ int getPort(int *port)
 	char readchar;
 	int m;
 	
-        config_fd = open("./webserver.config", O_RDONLY);
+        config_fd = open(HOME_PATH, O_RDONLY);
 	readchar = '\0';
 	while(':' != readchar)
 	{
@@ -215,6 +225,9 @@ int doGet(int cfd, char *request_buf)
 	struct stat statbuf;
 	int isLongConnect;
 	char buf[30];
+	int longConnectSwitch;
+
+	getLongConnectConfig(&longConnectSwitch);
 	
 	if(NULL == strstr(request_buf, "Connection: close"))
 	{
@@ -254,7 +267,7 @@ int doGet(int cfd, char *request_buf)
 //	sprintf(buf, "Content-Length: %d\r\n", statbuf.st_size);
 //	write(cfd, buf, strlen(buf));
 	write(cfd, "Transfer-Encoding: chunked\r\n", strlen("Transfer-Encoding: chunked\r\n"));
-	if(isLongConnect)
+	if(isLongConnect && longConnectSwitch)
 	{
 		write(cfd, "Connection: keep-alive\r\n", strlen("Connection: keep-alive\r\n"));
 	}
@@ -296,7 +309,7 @@ int getPath(char *path, char *request_buf)
  * param[in]:
  * param[out]: home path
  * return: status -1 fail and 0 success
- * decribe: get home path from ./webserver.config
+ * decribe: get home path from config file
  */
 int getHomePath(char *path)
 {
@@ -305,7 +318,7 @@ int getHomePath(char *path)
 	char lpath[MAX_LINE];
         int m;
 
-        config_fd = open("./webserver.config", O_RDONLY);
+        config_fd = open(HOME_PATH, O_RDONLY);
         readchar = '\0';
         while('\n' != readchar)
         {
@@ -325,6 +338,57 @@ int getHomePath(char *path)
 	lpath[m] = '\0';
 	
 	strcpy(path, lpath);
+
+	close(config_fd);
+
+	return 0;
+}
+/*
+ *
+ */
+int getLongConnectConfig(int *configStatus)
+{
+	int config_fd;
+	int m;
+	char status[MAX_LINE];
+	char readChar;
+	
+
+	config_fd = open(HOME_PATH, O_RDONLY);
+	for(m = 2; m > 0; m--)
+	{	readChar = '\0';
+		while('\n' != readChar)
+		{
+		        read(config_fd, &readChar, 1);
+		}
+	}
+	while(':' != readChar)
+        {
+                read(config_fd, &readChar, 1);
+        }
+	m = 0;
+	read(config_fd, &readChar, 1);
+        while('\n' != readChar)
+        {
+                status[m++] = readChar;
+                read(config_fd, &readChar, 1);
+	}
+	status[m] = '\0';
+	
+	if(0 == strcmp(status, "on"))
+	{
+		*configStatus = ON;
+	}
+	else if(0 == strcmp(status, "off"))
+	{
+		*configStatus = OFF;
+	}
+	else
+	{
+		printf("config error!\n");
+		return -1;
+	}
+	close(config_fd);
 
 	return 0;
 }
@@ -364,8 +428,11 @@ int sendFile(int cfd, char *path)
 int status404(int cfd, int isLongConnect)
 {
 	char buf[200];
+	int longConnectSwitch;
 
-	if(isLongConnect)
+	getLongConnectConfig(&longConnectSwitch);
+
+	if(isLongConnect && longConnectSwitch)
 	{
 		sprintf(buf, 
 			"HTTP/1.1 404 Not Exist\r\n"
