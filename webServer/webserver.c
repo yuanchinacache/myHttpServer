@@ -7,19 +7,48 @@
  */
 
 /*
+ * define micro
+ */
+#define PORT_STR_SIZE 6
+#define MAX_LINE 100
+#define MAX_REQUEST 2000
+#define MAX_RW 100
+#define MAX_COMMAND 20
+
+#define GET 1
+#define PUT 2
+
+#define ON 1
+#define OFF 0
+
+#define HOME_PATH "./webserver.config"
+
+/*
  * head files
  */
-
-#include "webserver.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <netinet/in.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 /*
  * declare function
  */
 static int getPort(int *port);
+static int getRequest(int cfd, char *request_buf);
+static int getCommand(char *request_buf, int *command);
+static int doGet(int cfd, char *request_buf);
 static int getPath(char *path, char *request_buf);
 static int getHomePath(char *path);
 static int getLongConnectConfig(int *configStatus);
 static int sendFile(int cfd, char *path);
+static int status500(int cfd);
+static int status501(int cfd);
+static int status404(int cfd, int isLongConnect);
 
 /*
  *
@@ -40,6 +69,50 @@ int init(int *sfd)
 	*sfd = socket(AF_INET, SOCK_STREAM, 0);
 	bind(*sfd, (struct sockaddr *)&sin, sizeof(struct sockaddr_in));
 	listen(*sfd, 3);
+
+	return 0;
+}
+
+/*
+ *
+ */
+int doRequest(int cfd)
+{
+	char request_buf[MAX_REQUEST];
+	int command;
+	int isLongConnect;
+	int longConnectSwitch;
+
+	getLongConnectConfig(&longConnectSwitch);
+	//printf("longConnectSwitch:%d\n", longConnectSwitch);
+	/*
+	when client close, how to exit process of server?
+	*/
+	do
+	{
+		printf("start!\n");
+		getRequest(cfd, request_buf);
+		if(NULL == strstr(request_buf, "Connection: close"))
+		{
+			isLongConnect = 1;
+		}
+		else
+		{
+			isLongConnect = 0;
+		}
+
+		getCommand(request_buf, &command);			
+		switch(command)
+		{
+		case GET:
+			doGet(cfd, request_buf);
+			break;
+		default:
+			status501(cfd);
+			exit(-1);
+		}
+		printf("end!\n");
+	}while(isLongConnect && longConnectSwitch);
 
 	return 0;
 }
